@@ -1,7 +1,7 @@
 # zephyr_sync
 
 Zephyr test cases do not import easily into JIRA. Here lies a sweet of
-commands which facilite the creation, deletion, syncing, and validation of
+commands which facilitate the creation, deletion, syncing, and validation of
 test cases between 2 instances.
 
 I supposed you could also use this as an import tool with some minor
