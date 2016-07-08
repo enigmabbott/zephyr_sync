@@ -8,8 +8,8 @@ use MIME::Base64;
 use JSON;
 use Test::More;
 
-has staging_url => (is => 'rw', isa  => 'Str', default => 'https://stagingjira.ehi.com');
-has production_url => (is => 'rw', isa  => 'Str', default => 'https://jira.ehi.com');
+has staging_url => (is => 'rw', isa  => 'Str', default => 'https://stagingjira.myinstance.com');
+has production_url => (is => 'rw', isa  => 'Str', default => 'https://jira.myinstance.com');
 has username => (is => 'rw', isa  => 'Str', required => 1);
 has password => (is => 'rw', isa  => 'Str', required => 1);
 #rc == rest_client
