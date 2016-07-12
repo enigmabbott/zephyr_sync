@@ -20,7 +20,6 @@ has json => (is => 'ro', isa  => 'Object', lazy => 1, default => sub {JSON->new-
 
 sub test_step_base  { return '/rest/zapi/latest/teststep'; }
 
-
 sub rest_headers {
     my $self = shift;
 
@@ -55,6 +54,141 @@ sub validate_test_steps {
         is($prod_steps->[$i]->{step},$dev_steps->[$i]->{step}, "$i step matches");
         is($prod_steps->[$i]->{data},$dev_steps->[$i]->{data}, "$i datamatches");
         is($prod_steps->[$i]->{result},$dev_steps->[$i]->{result}, "$i result matches");
+    }
+
+    return 1;
+}
+
+sub get_test_executions { 
+    my ($self, %p) = @_;
+    my $rc = $p{rc} or die;
+    my $issue_id = $p{issue_id} or die;
+
+    #$rc->GET("rest/zapi/latest/execution/executionByIssue?issueIdOrKey=$issue_key", $self->rest_headers);
+    $rc->GET("rest/zapi/latest/execution?issueId=$issue_id", $self->rest_headers);
+    
+    return $self->process_response($rc, $issue_id);
+}
+
+sub sync_test_executions {
+    my ($self, %p) = @_;
+    my $issue_key = $p{issue_key};
+    print "key $issue_key\n";
+
+    my $source_rc= $p{source_rc};
+    my $dest_rc= $p{dest_rc};
+
+	$source_rc->GET("rest/api/2/issue/$issue_key?fields=id", $self->rest_headers);
+    my $shash =$self->process_response($source_rc, $issue_key);
+	my $source_id = $shash->{id};
+    print "source_id: $source_id\n";
+
+	$dest_rc->GET("rest/api/2/issue/$issue_key?fields=id,project", $self->rest_headers);
+    my $dhash =$self->process_response($dest_rc, $issue_key);
+	my $dest_id = $dhash->{id};
+    print "dest_id: $dest_id\n";
+    my $dest_project_id = $dhash->{fields}->{project}->{id};
+
+    unless($dest_project_id){
+        print Dumper $dhash;
+        die;
+    }
+
+=cut
+my %versions;
+if($self->{_versions}){
+    %versions = %{$self->{_versions}};
+}else {
+    my $str = "rest/zapi/latest/cycle?projectId=$dest_project_id";
+#    print $str . "\n";
+     $dest_rc->GET($str, $self->rest_headers);
+    $dhash =$self->process_response($dest_rc, $issue_key);
+
+# $source_rc->GET("rest/zapi/latest/cycle?projectId=13902", $self->rest_headers);
+     # $dhash =$self->process_response($source_rc, $issue_key);
+
+     # print Dumper $dhash;
+     # exit;
+
+    for my $version_id(keys %$dhash){
+         for my $hashes(@{$dhash->{$version_id}}){
+             delete $hashes->{recordsCount};
+
+             for my $cycle_id (keys %$hashes){
+                 my $h = $hashes->{$cycle_id};
+                 $versions{$h->{versionName}}->{versionId} = $version_id;
+                 $versions{$h->{versionName}}->{$h->{name}} = $cycle_id;
+             }
+         }
+     }
+
+    $self->{_versions} = \%versions;
+}
+=cut
+
+    my $source_hash = $self->get_test_executions(rc => $source_rc, issue_id => $source_id);
+    my $s_ex = $source_hash->{executions};
+    return 1 if scalar(@$s_ex) == 0;
+
+
+    my $dest_hash = $self->get_test_executions(rc => $dest_rc, issue_id => $dest_id);
+    my $d_ex = $dest_hash->{executions};
+
+    my $i= 0;
+    print "execution count: " . scalar(@$d_ex) . "\n";
+
+    for my $s (@$s_ex){
+        #print Dumper $s;
+        $i++;
+        my $version_name = $s->{versionName};
+
+        my $cycle_name = $s->{cycleName};
+
+        my @hits = grep {($_->{versionName} eq $version_name) && ($_->{cycleName} eq $cycle_name ) } @$d_ex;
+        if(scalar(@hits) == 0 and $version_name eq 'Unscheduled' ){
+            next;
+        }
+        unless(@hits){
+            die "no hits";
+        }
+
+        if(scalar(@hits) > 1){
+            print Dumper \@hits;
+            die "multiple hits";
+        }
+
+        my $id = $hits[0]->{id};
+        print "found id: $id\n";
+    #    print Dumper \@hits;
+        unless( $s->{executedOn}){
+            print "not executed on dev\n";
+            next;
+        }
+        if($hits[0]->{executedOn}){
+            print "production already executed\n";
+            next;
+        }
+
+        my %ex  = ( executions => [$id],
+                   "assigneeType" => "assignee",
+                   "assignee" =>  $s->{executedBy},
+                   );
+
+print "put assign\n";
+print Dumper \%ex;
+
+
+           $dest_rc->PUT("rest/zapi/latest/execution/bulkAssign" ,  encode_json(\%ex), $self->rest_headers);
+           my $hash =$self->process_response($dest_rc, $dest_id) or die;
+           
+
+           %ex =( status => $s->{executionStatus},);
+
+print "put status: \n";
+print Dumper \%ex;
+
+           $dest_rc->PUT("rest/zapi/latest/execution/$id/execute/" ,  encode_json(\%ex), $self->rest_headers);
+           $hash =$self->process_response($dest_rc, $dest_id) or die;
     }
 
     return 1;
